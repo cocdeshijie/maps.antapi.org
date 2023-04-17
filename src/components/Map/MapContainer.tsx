@@ -1,130 +1,70 @@
-import React, { useRef, useEffect, useState } from 'react';
-import mapboxgl, { Map} from 'mapbox-gl';
+import React, { useRef } from 'react';
+import {
+    Map,
+    MapRef,
+    Source,
+    Layer,
+    MapLayerMouseEvent,
+    GeoJSONSource,
+    LngLatLike
+} from 'react-map-gl';
+import {clusterLayer, clusterCountLayer, unclusteredPointLayer} from "@/components/Map/Layers";
 import 'mapbox-gl/dist/mapbox-gl.css';
+import { Point } from "geojson";
 
-mapboxgl.accessToken = 'pk.eyJ1IjoiY29jZGVzaGlqaWUiLCJhIjoiY2t6dDd2OGUwMDJ0dDJ1bnJmdzNvYTRzcSJ9.2RMz1yjYV118XJq_OStX3Q';
+function MapContainer({}) {
+    const mapRef = useRef<MapRef>(null);
 
-interface DataItem {
-    genus: string;
-    species: string;
-    subspecies: string;
-    data_source: string;
-    specimen_code: string;
-    date: string;
-    latitude: number;
-    longitude: number;
-}
+    const onClick = (event: MapLayerMouseEvent) => {
+        if (event.features?.length) {
+            const feature = event.features[0];
+            const clusterId = feature.properties!.cluster_id;
+            const mapboxSource = mapRef.current!.getSource('species_records') as GeoJSONSource;
+            const point = feature.geometry as Point;
+            mapboxSource.getClusterExpansionZoom(clusterId, (err, zoom) => {
+                if (err) {
+                    return;
+                }
 
-interface FetchedData {
-    full_name: string;
-    records_count: number;
-    records: DataItem[];
-}
-
-function MapContainer() {
-    const mapContainer = useRef<HTMLDivElement | null>(null);
-    const mapInstance = useRef<Map | null>(null);
-    const [data, setData] = useState<GeoJSON.Feature[] | null>(null);
-
-    useEffect(() => {
-        fetch('https://api.antapi.org/records/Pogonomymex/cali')
-            .then((response) => response.json())
-            .then((fetchedData: FetchedData) => {
-                setData(
-                    fetchedData.records.map((item: DataItem) => ({
-                        type: 'Feature',
-                        properties: item,
-                        geometry: {
-                            type: 'Point',
-                            coordinates: [item.longitude, item.latitude],
-                        },
-                    })),
-                );
-            });
-    }, []);
-
-    useEffect(() => {
-        if (!data) return;
-
-        if (mapContainer.current) {
-            mapInstance.current = new mapboxgl.Map({
-                container: mapContainer.current,
-                style: 'mapbox://styles/mapbox/dark-v11',
-                center: [0, 0],
-                zoom: 1,
-            });
-
-            const map = mapInstance.current;
-
-            map.on('load', () => {
-                // Add a new source from the data.
-                map.addSource('ants', {
-                    type: 'geojson',
-                    data: {
-                        type: 'FeatureCollection',
-                        features: data,
-                    },
-                    cluster: true,
-                    clusterMaxZoom: 14,
-                    clusterRadius: 50,
-                });
-
-                // Create a layer for clusters.
-                map.addLayer({
-                    id: 'clusters',
-                    type: 'circle',
-                    source: 'ants',
-                    filter: ['has', 'point_count'],
-                    paint: {
-                        'circle-color': [
-                            'step',
-                            ['get', 'point_count'],
-                            '#51bbd6',
-                            100,
-                            '#f1f075',
-                            750,
-                            '#f28cb1',
-                        ],
-                        'circle-radius': [
-                            'step',
-                            ['get', 'point_count'],
-                            20,
-                            100,
-                            30,
-                            750,
-                            40,
-                        ],
-                    },
-                });
-
-                // Create a layer for the individual points within the clusters.
-                map.addLayer({
-                    id: 'unclustered-points',
-                    type: 'circle',
-                    source: 'ants',
-                    filter: ['!', ['has', 'point_count']],
-                    paint: {
-                        'circle-color': '#11b4da',
-                        'circle-radius': 4,
-                        'circle-stroke-width': 1,
-                        'circle-stroke-color': '#fff',
-                    },
+                mapRef.current!.easeTo({
+                    center: point.coordinates as LngLatLike,
+                    zoom,
+                    duration: 500
                 });
             });
         }
 
-        return () => {
-            if (mapInstance.current) {
-                mapInstance.current.remove();
-            }
-        };
-    }, [data]);
+    };
 
     return (
-        <div className="h-screen w-full container relative">
-            <div ref={mapContainer} style={{ width: '90%', height: '100%' }} />
+        // TODO: w-11/12 for now, but should be w-full
+        <div className="h-screen w-11/12 container relative">
+            <Map
+                initialViewState={{
+                    latitude: 40.67,
+                    longitude: -103.59,
+                    zoom: 3
+                }}
+                mapStyle="mapbox://styles/mapbox/dark-v9"
+                mapboxAccessToken="pk.eyJ1IjoiY29jZGVzaGlqaWUiLCJhIjoiY2t6dDd2OGUwMDJ0dDJ1bnJmdzNvYTRzcSJ9.2RMz1yjYV118XJq_OStX3Q"
+                onClick={onClick}
+                interactiveLayerIds={[clusterLayer.id as string]}
+                ref={mapRef}
+                style={{width: '100%', height: '100%'}}>
+                <Source
+                    id="species_records"
+                    type="geojson"
+                    data="https://api.antapi.org/records_geojson/Camponotus/fragilis"
+                    cluster={true}
+                    clusterMaxZoom={14}
+                    clusterRadius={50}>
+                    <Layer {...clusterLayer} />
+                    <Layer {...clusterCountLayer} />
+                    <Layer {...unclusteredPointLayer} />
+                </Source>
+            </Map>
         </div>
-    );
+    )
 }
 
 export default MapContainer;
